@@ -25,8 +25,8 @@ import scipy
 from scipy import sparse
 
 def load_parameters():
-    D_R_mtx=pd.read_csv("/temp/drug_receptor_mtx.csv",index_col=0)
-    GPCR_type_df=pd.read_csv("/temp/GPCR_df.csv",index_col=0)
+    D_R_mtx=pd.read_csv("/data/drug_receptor_mtx.csv",index_col=0)
+    GPCR_type_df=pd.read_csv("/data/GPCR_df.csv",index_col=0)
 
     drug_list=D_R_mtx.index.to_list()
     GPCR_list=["HTR1A","HTR1B","HTR1D","HTR1E","HTR2A","HTR2B","HTR2C",
