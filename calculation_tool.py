@@ -63,7 +63,7 @@ def set_parameters_for_preprocess(GPCR_list):
     
     # Set Batched PCA parameters
     params['pca_train_ratio'] = 0.35
-    params['n_pca_batches'] = 10
+    params['n_pca_batches'] = 40
     
     # Set t-SNE parameters
     params['tsne_n_pcs'] = 20
@@ -173,7 +173,8 @@ def preprocess_adata_in_bulk(adata_path,label=None,add_markers=None):
     sparse_gpu_array -= mean
     stddev = cp.sqrt(sparse_gpu_array.var(axis=0))
     sparse_gpu_array /= stddev
-    sparse_gpu_array = sparse_gpu_array.clip(a_max=10)
+    print(sparse_gpu_array.dtype)
+    sparse_gpu_array = sparse_gpu_array.clip(None,10)
     del mean, stddev
     
     preprocess_time = time.time()
@@ -297,7 +298,7 @@ def preprocess_adata_in_batch(adata_path,max_cells):
     sparse_gpu_array -= mean
     stddev = cp.sqrt(sparse_gpu_array.var(axis=0))
     sparse_gpu_array /= stddev
-    sparse_gpu_array = sparse_gpu_array.clip(a_max=10)
+    sparse_gpu_array = sparse_gpu_array.clip(None,10)
     del mean, stddev
     
     preprocess_time = time.time()
