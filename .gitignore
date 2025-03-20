@@ -9,5 +9,5 @@ __pycache__
 .ipython/
 .cache/
 
-data/
+/data
 notebooks/dask-worker-space/
