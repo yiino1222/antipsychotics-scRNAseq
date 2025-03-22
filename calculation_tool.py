@@ -65,7 +65,7 @@ def set_parameters_for_preprocess(GPCR_list):
     
     # Set Batched PCA parameters
     params['pca_train_ratio'] = 0.20
-    params['n_pca_batches'] = 100
+    params['n_pca_batches'] = 40
     
     # Set t-SNE parameters
     params['tsne_n_pcs'] = 20
@@ -379,25 +379,25 @@ def preprocess_adata_in_batch(adata_path,max_cells):
     
     Gs=GPCR_type_df[GPCR_type_df.type=="Gs"]["receptor_name"].values
     Gi=GPCR_type_df[GPCR_type_df.type=="Gi"]["receptor_name"].values
-    Gq=GPCR_type_df[GPCR_type_df.type=="Gq"]["receptor_name"].values
+    #Gq=GPCR_type_df[GPCR_type_df.type=="Gq"]["receptor_name"].values
     
     cAMP_df=pd.DataFrame(columns=drug_list)
-    Ca_df=pd.DataFrame(columns=drug_list)
+    #Ca_df=pd.DataFrame(columns=drug_list)
     for drug in drug_list:
         Gs_effect=(norm_df.loc[:,Gs]/D_R_mtx.loc[drug,Gs]).sum(axis=1) #TODO ki値で割り算するときにlog換算すべきか
         Gi_effect=(norm_df.loc[:,Gi]/D_R_mtx.loc[drug,Gi]).sum(axis=1)
-        Gq_effect=(norm_df.loc[:,Gq]/D_R_mtx.loc[drug,Gq]).sum(axis=1)
+        #Gq_effect=(norm_df.loc[:,Gq]/D_R_mtx.loc[drug,Gq]).sum(axis=1)
         cAMPmod=Gi_effect-Gs_effect #Giの阻害→cAMP上昇、Gsの阻害→cAMP低下
         Camod=-Gq_effect #Gq阻害→Ca低下
         cAMP_df[drug]=cAMPmod
         Ca_df[drug]=Camod
         
     cAMP_df.index=adata.obs_names
-    Ca_df.index=adata.obs_names
-    Ca_df=Ca_df+10**(-4)
+    #Ca_df.index=adata.obs_names
+    #Ca_df=Ca_df+10**(-4)
     for drug in drug_list:
         adata.obs['cAMP_%s'%drug]=cAMP_df[drug]
-        adata.obs['Ca_%s'%drug]=Ca_df[drug]
+        #adata.obs['Ca_%s'%drug]=Ca_df[drug]
     
     #save preprocessed adata 
     file_root, file_extension = os.path.splitext(adata_path)
@@ -423,7 +423,7 @@ def calc_drug_response(adata,GPCR_df,GPCR_type_df,drug_list,D_R_mtx):
     Gq=GPCR_type_df[GPCR_type_df.type=="Gq"]["receptor_name"].values
     
     cAMP_df=pd.DataFrame(columns=drug_list)
-    Ca_df=pd.DataFrame(columns=drug_list)
+    #Ca_df=pd.DataFrame(columns=drug_list)
     drug_conc_list=[0.1,0.2,1]
     drug_conc_name_list=["low","mid","high"]
     for drug in drug_list:
