@@ -62,8 +62,8 @@ def set_parameters_for_preprocess(GPCR_list):
     params['n_components'] = 50
     
     # Set Batched PCA parameters
-    params['pca_train_ratio'] = 0.35
-    params['n_pca_batches'] = 40
+    params['pca_train_ratio'] = 0.20
+    params['n_pca_batches'] = 100
     
     # Set t-SNE parameters
     params['tsne_n_pcs'] = 20
@@ -210,19 +210,24 @@ def preprocess_adata_in_bulk(adata_path,label=None,add_markers=None):
     #However, we cannot perform PCA on the complete dataset using a single GPU. 
     # Therefore, we use the batched PCA function in `utils.py`, which uses only a fraction 
     # of the total cells to train PCA.
+    print("perform PCA")
+    print(params["n_pca_batches"])
     adata = utils.pca(adata, n_components=params["n_components"], 
                   train_ratio=params["pca_train_ratio"], 
                   n_batches=params["n_pca_batches"],
                   gpu=True)
     
     #t-sne + k-means
+    print("t-sne")
     adata=tsne_kmeans(adata,params['tsne_n_pcs'],params['k'])
     
     #UMAP + Graph clustering
+    print("UMAP")
     adata=UMAP_adata(adata,params["n_neighbors"],params["knn_n_pcs"],
                      params["umap_min_dist"],params["umap_spread"])
    
     #calculate response to antipsychotics
+    print("calc drug response")
     adata=calc_drug_response(adata,GPCR_df,GPCR_type_df,drug_list,D_R_mtx)
     
     #calculate clz selectivity
