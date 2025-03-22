@@ -23,6 +23,8 @@ import pandas as pd
 from sh import gunzip
 import scipy
 from scipy import sparse
+import gc
+import cupy as cp
 
 def load_parameters():
     D_R_mtx=pd.read_csv("/data/drug_receptor_mtx.csv",index_col=0)
@@ -152,6 +154,10 @@ def preprocess_adata_in_bulk(adata_path,label=None,add_markers=None):
     }
 
     del tmp_norm
+
+    gc.collect()
+    cp.get_default_memory_pool().free_all_blocks()
+
     ## Regress out confounding factors (number of counts, mitochondrial gene expression)
     # calculate the total counts and the percentage of mitochondrial counts for each cell
     mito_genes = genes.str.startswith(params['MITO_GENE_PREFIX'])
@@ -165,6 +171,8 @@ def preprocess_adata_in_bulk(adata_path,label=None,add_markers=None):
     
     sparse_gpu_array = rapids_scanpy_funcs.regress_out(sparse_gpu_array.tocsc(), n_counts, percent_mito)
     del n_counts, percent_mito, mito_genes
+    gc.collect()
+    cp.get_default_memory_pool().free_all_blocks()
     
     
     # scale
@@ -176,6 +184,8 @@ def preprocess_adata_in_bulk(adata_path,label=None,add_markers=None):
     print(sparse_gpu_array.dtype)
     sparse_gpu_array = sparse_gpu_array.clip(None,10)
     del mean, stddev
+    gc.collect()
+    cp.get_default_memory_pool().free_all_blocks()
     
     preprocess_time = time.time()
     print("Total Preprocessing time: %s" % (preprocess_time-preprocess_start))
@@ -194,6 +204,8 @@ def preprocess_adata_in_bulk(adata_path,label=None,add_markers=None):
         adata.obs["label"] = filtered_labels
     
     del sparse_gpu_array, genes
+    gc.collect()
+    cp.get_default_memory_pool().free_all_blocks()
     print(f"shape of adata: {adata.X.shape}")
     
     GPCR_df=pd.DataFrame()
@@ -439,7 +451,7 @@ def calc_clz_selective_cell(adata,drug_list):
     adata.obs["is_clz_inhibited"]=np.zeros(len(adata.obs))
     adata.obs["is_clz_inhibited"][adata.obs["cAMP_CLOZAPINE"]<-10]=1
     adata.obs["is_clz_inhibited"]=adata.obs["is_clz_inhibited"].astype("category")
-    
+    """
     drug_list_temp=drug_list.copy()
     drug_list_temp.remove("CLOZAPINE")
 
@@ -456,13 +468,31 @@ def calc_clz_selective_cell(adata,drug_list):
     
     adata.obs["is_clz_selective"]=np.zeros(len(adata.obs))
     adata.obs["is_clz_selective"][(adata.obs["cAMP_clz_selectivity"]>selectivity_threshold)&(adata.obs["cAMP_CLOZAPINE"]>0)]=1
-    adata.obs["is_clz_selective"]=adata.obs["is_clz_selective"].astype("category")
+    adata.obs["is_clz_selective"]=adata.obs["is_clz_selective"].astype("category")"
+    """
+    # 「CLOZAPINE」以外の薬に対応するカラム名のリストを作成
+    drug_cols = [f"cAMP_{drug}" for drug in drug_list if drug != "CLOZAPINE"]
+
+    # メモリ使用量削減のため、必要に応じて計算対象カラムを float32 にキャスト
+    for col in drug_cols + ["cAMP_CLOZAPINE"]:
+        adata.obs[col] = adata.obs[col].astype("float32")
+
+    # 薬ごとの cAMP 値の平均を一括で計算
+    adata.obs["cAMP_mean_other_than_czp"] = adata.obs[drug_cols].mean(axis=1)
+
+    # クロザピンに対するセレクティビティの計算（各細胞ごとにベクトル演算）
+    adata.obs["cAMP_clz_selectivity"] = (adata.obs["cAMP_CLOZAPINE"] ** 2) / (adata.obs["cAMP_mean_other_than_czp"] ** 2)
+
+    # selectivity_threshold と cAMP_CLOZAPINE > 0 の条件を満たす細胞をカテゴリ型でラベル付け
+    adata.obs["is_clz_selective"] = (((adata.obs["cAMP_clz_selectivity"] > selectivity_threshold) & 
+                                    (adata.obs["cAMP_CLOZAPINE"] > 0))
+                                    ).astype("category")
     
     print("clz selective cells")
     sc.pl.umap(adata, color=["is_clz_selective"])
     
     print("calculating gene marker of clz selective cell")
-    sc.tl.rank_genes_groups(adata, 'is_clz_selective', method='wilcoxon')
+    sc.tl.rank_genes_groups(adata, 'is_clz_selective', method='logreg',use_raw=False)
     #sc.pl.rank_genes_groups(adata, n_genes=30, sharey=False)
 
     return(adata)
