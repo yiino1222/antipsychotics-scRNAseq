@@ -424,12 +424,16 @@ def calc_drug_response(adata,GPCR_df,GPCR_type_df,drug_list,D_R_mtx):
     
     cAMP_df=pd.DataFrame(columns=drug_list)
     Ca_df=pd.DataFrame(columns=drug_list)
-    drug_conc_list=[0.1,0.5,1]
+    drug_conc_list=[0.1,0.2,1]
     drug_conc_name_list=["low","mid","high"]
     for drug in drug_list:
-        for i,drug_conc in enumerate(drug_conc_list):
-            Gs_effect=(norm_df.loc[:,Gs]/(1+drug_conc/D_R_mtx.loc[drug,Gs])).sum(axis=1) #TODO ki値で割り算するときにlog換算すべきか
+        #for i,drug_conc in enumerate(drug_conc_list):
+            i=1
+            drug_conc=D_R_mtx.mean()
+            Gs_effect=(norm_df.loc[:,Gs]/(1+drug_conc/D_R_mtx.loc[drug,Gs])).sum(axis=1) 
             Gi_effect=(norm_df.loc[:,Gi]/(1+drug_conc/D_R_mtx.loc[drug,Gi])).sum(axis=1)
+            #Gs_effect=(norm_df.loc[:,Gs]/D_R_mtx.loc[drug,Gs]).sum(axis=1) 
+            #Gi_effect=(norm_df.loc[:,Gi]/D_R_mtx.loc[drug,Gi]).sum(axis=1)
             #Gq_effect=(norm_df.loc[:,Gq]/D_R_mtx.loc[drug,Gq]).sum(axis=1)
             cAMPmod=Gi_effect-Gs_effect #Giの阻害→cAMP上昇、Gsの阻害→cAMP低下
             #Camod=-Gq_effect #Gq阻害→Ca低下
@@ -446,7 +450,7 @@ def calc_drug_response(adata,GPCR_df,GPCR_type_df,drug_list,D_R_mtx):
     return adata
 
 def calc_clz_selective_cell(adata,drug_list):
-    selectivity_threshold=1.5
+    selectivity_threshold=1.2
     adata.obs["is_clz_activated"]=np.zeros(len(adata.obs))
     adata.obs["is_clz_activated"][adata.obs["cAMP_CLOZAPINE"]>10]=1
     adata.obs["is_clz_activated"]=adata.obs["is_clz_activated"].astype("category")
