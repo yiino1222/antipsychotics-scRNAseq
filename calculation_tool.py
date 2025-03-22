@@ -491,8 +491,8 @@ def calc_clz_selective_cell(adata,drug_list):
     print("clz selective cells")
     sc.pl.umap(adata, color=["is_clz_selective"])
     
-    print("calculating gene marker of clz selective cell")
-    sc.tl.rank_genes_groups(adata, 'is_clz_selective', method='logreg',use_raw=False)
+    #print("calculating gene marker of clz selective cell")
+    #sc.tl.rank_genes_groups(adata, 'is_clz_selective', method='logreg',use_raw=False)
     #sc.pl.rank_genes_groups(adata, n_genes=30, sharey=False)
 
     return(adata)
