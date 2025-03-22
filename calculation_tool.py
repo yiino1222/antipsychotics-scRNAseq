@@ -424,21 +424,24 @@ def calc_drug_response(adata,GPCR_df,GPCR_type_df,drug_list,D_R_mtx):
     
     cAMP_df=pd.DataFrame(columns=drug_list)
     Ca_df=pd.DataFrame(columns=drug_list)
+    drug_conc_list=[0.1,0.5,1]
+    drug_conc_name_list=["low","mid","high"]
     for drug in drug_list:
-        Gs_effect=(norm_df.loc[:,Gs]/D_R_mtx.loc[drug,Gs]).sum(axis=1) #TODO ki値で割り算するときにlog換算すべきか
-        Gi_effect=(norm_df.loc[:,Gi]/D_R_mtx.loc[drug,Gi]).sum(axis=1)
-        Gq_effect=(norm_df.loc[:,Gq]/D_R_mtx.loc[drug,Gq]).sum(axis=1)
-        cAMPmod=Gi_effect-Gs_effect #Giの阻害→cAMP上昇、Gsの阻害→cAMP低下
-        Camod=-Gq_effect #Gq阻害→Ca低下
-        cAMP_df[drug]=cAMPmod
-        Ca_df[drug]=Camod
+        for i,drug_conc in enumerate(drug_conc_list):
+            Gs_effect=(norm_df.loc[:,Gs]/(1+drug_conc/D_R_mtx.loc[drug,Gs])).sum(axis=1) #TODO ki値で割り算するときにlog換算すべきか
+            Gi_effect=(norm_df.loc[:,Gi]/(1+drug_conc/D_R_mtx.loc[drug,Gi])).sum(axis=1)
+            #Gq_effect=(norm_df.loc[:,Gq]/D_R_mtx.loc[drug,Gq]).sum(axis=1)
+            cAMPmod=Gi_effect-Gs_effect #Giの阻害→cAMP上昇、Gsの阻害→cAMP低下
+            #Camod=-Gq_effect #Gq阻害→Ca低下
+            cAMP_df[drug+"_"+drug_conc_name_list[i]]=cAMPmod
+            #Ca_df[drug]=Camod
         
     cAMP_df.index=adata.obs_names
-    Ca_df.index=adata.obs_names
-    Ca_df=Ca_df+10**(-4)
+    #Ca_df.index=adata.obs_names
+    #Ca_df=Ca_df+10**(-4)
     for drug in drug_list:
-        adata.obs['cAMP_%s'%drug]=cAMP_df[drug]
-        adata.obs['Ca_%s'%drug]=Ca_df[drug]
+        adata.obs['cAMP_%s'%drug]=cAMP_df[drug+"_mid"]
+        #adata.obs['Ca_%s'%drug]=Ca_df[drug]
         
     return adata
 
