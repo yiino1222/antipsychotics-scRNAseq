@@ -64,7 +64,7 @@ def set_parameters_for_preprocess(GPCR_list):
     params['n_components'] = 50
     
     # Set Batched PCA parameters
-    params['pca_train_ratio'] = 0.20
+    params['pca_train_ratio'] = 0.10
     params['n_pca_batches'] = 40
     
     # Set t-SNE parameters
@@ -231,7 +231,7 @@ def preprocess_adata_in_bulk(adata_path,label=None,add_markers=None):
     
     #t-sne + k-means
     print("t-sne")
-    adata=tsne_kmeans(adata,params['tsne_n_pcs'],params['k'])
+    #adata=tsne_kmeans(adata,params['tsne_n_pcs'],params['k'])
     
     #UMAP + Graph clustering
     print("UMAP")
@@ -251,7 +251,7 @@ def preprocess_adata_in_bulk(adata_path,label=None,add_markers=None):
     processed_file_path = f"{file_root}_processed{file_extension}"
     adata.write(processed_file_path)
     
-    return adata
+    return adata,GPCR_df
 
 def tsne_kmeans(adata,tsne_n_pcs,k):
     adata.obsm['X_tsne'] = TSNE().fit_transform(adata.obsm["X_pca"][:,:tsne_n_pcs])
@@ -274,6 +274,124 @@ def UMAP_adata(adata,n_neighbors,knn_n_pcs,umap_min_dist,umap_spread):
     sc.pl.umap(adata, color=["leiden"])
     return adata
 
+def calc_drug_response(adata,GPCR_df,GPCR_type_df,drug_list,D_R_mtx):
+    #noramlize GPCR expression levels
+    GPCR_adata=anndata.AnnData(X=GPCR_df)
+    GPCR_adata_norm=sc.pp.normalize_total(GPCR_adata,target_sum=1e4,inplace=False)['X']
+    GPCR_adata_norm_df=pd.DataFrame(GPCR_adata_norm,columns=GPCR_adata.var.index)
+    norm_df=pd.DataFrame(GPCR_adata_norm)
+    norm_col=[str[:-4] for str in GPCR_df.columns]
+    norm_df.columns=norm_col
+    
+    GPCR_type_df=GPCR_type_df[GPCR_type_df.receptor_name.isin(norm_col)]
+    
+    Gs=GPCR_type_df[GPCR_type_df.type=="Gs"]["receptor_name"].values
+    Gi=GPCR_type_df[GPCR_type_df.type=="Gi"]["receptor_name"].values
+    #Gq=GPCR_type_df[GPCR_type_df.type=="Gq"]["receptor_name"].values
+    
+    cAMP_df=pd.DataFrame(columns=drug_list)
+    #Ca_df=pd.DataFrame(columns=drug_list)
+    for drug in drug_list:
+        Gs_effect=(norm_df.loc[:,Gs]/(1+drug_conc/D_R_mtx.loc[drug,Gs])).sum(axis=1) #TODO ki値で割り算するときにlog換算すべきか
+        Gi_effect=(norm_df.loc[:,Gi]/(1+drug_conc/D_R_mtx.loc[drug,Gi])).sum(axis=1)
+        basal_cAMP=(norm_df.loc[:,Gs]-norm_df.loc[:,Gi]).sum(axis=1)
+        #Gq_effect=(norm_df.loc[:,Gq]/D_R_mtx.loc[drug,Gq]).sum(axis=1)
+        cAMPmod=(Gs_effect-Gi_effect)-basal_cAMP #Giの阻害→cAMP上昇、Gsの阻害→cAMP低下
+        
+    cAMP_df.index=adata.obs_names
+    #Ca_df.index=adata.obs_names
+    #Ca_df=Ca_df+10**(-4)
+    for drug in drug_list:
+        adata.obs['cAMP_%s'%drug]=cAMP_df[drug+"_mid"]
+        #adata.obs['Ca_%s'%drug]=Ca_df[drug]
+        
+    return adata
+
+
+
+def calc_clz_selective_cell(adata,drug_list):
+    selectivity_threshold=1.2
+    adata.obs["is_clz_activated"]=np.zeros(len(adata.obs))
+    adata.obs["is_clz_activated"][adata.obs["cAMP_CLOZAPINE"]>10]=1
+    adata.obs["is_clz_activated"]=adata.obs["is_clz_activated"].astype("category")
+    
+    adata.obs["is_clz_inhibited"]=np.zeros(len(adata.obs))
+    adata.obs["is_clz_inhibited"][adata.obs["cAMP_CLOZAPINE"]<-10]=1
+    adata.obs["is_clz_inhibited"]=adata.obs["is_clz_inhibited"].astype("category")
+    """
+    drug_list_temp=drug_list.copy()
+    drug_list_temp.remove("CLOZAPINE")
+
+    for idx,drug in enumerate(drug_list_temp):
+        #print(idx)
+        if idx==0:
+            cAMP_mean=adata.obs["cAMP_%s"%drug]
+        else:
+            cAMP_mean=cAMP_mean+adata.obs["cAMP_%s"%drug]
+        #print(adata.obs["cAMP_%s"%drug])
+    cAMP_mean=cAMP_mean/len(drug_list_temp)
+    adata.obs["cAMP_mean_other_than_czp"]=cAMP_mean
+    adata.obs["cAMP_clz_selectivity"]=adata.obs["cAMP_CLOZAPINE"]**2/cAMP_mean**2
+    
+    adata.obs["is_clz_selective"]=np.zeros(len(adata.obs))
+    adata.obs["is_clz_selective"][(adata.obs["cAMP_clz_selectivity"]>selectivity_threshold)&(adata.obs["cAMP_CLOZAPINE"]>0)]=1
+    adata.obs["is_clz_selective"]=adata.obs["is_clz_selective"].astype("category")"
+    """
+    # 「CLOZAPINE」以外の薬に対応するカラム名のリストを作成
+    drug_cols = [f"cAMP_{drug}" for drug in drug_list if drug != "CLOZAPINE"]
+
+    # メモリ使用量削減のため、必要に応じて計算対象カラムを float32 にキャスト
+    for col in drug_cols + ["cAMP_CLOZAPINE"]:
+        adata.obs[col] = adata.obs[col].astype("float32")
+
+    # 薬ごとの cAMP 値の平均を一括で計算
+    adata.obs["cAMP_mean_other_than_czp"] = adata.obs[drug_cols].mean(axis=1)
+
+    # クロザピンに対するセレクティビティの計算（各細胞ごとにベクトル演算）
+    adata.obs["cAMP_clz_selectivity"] = (adata.obs["cAMP_CLOZAPINE"] ** 2) / (adata.obs["cAMP_mean_other_than_czp"] ** 2)
+
+    # selectivity_threshold と cAMP_CLOZAPINE > 0 の条件を満たす細胞をカテゴリ型でラベル付け
+    adata.obs["is_clz_selective"] = (((adata.obs["cAMP_clz_selectivity"] > selectivity_threshold) & 
+                                    (adata.obs["cAMP_CLOZAPINE"] > 0))
+                                    ).astype("category")
+    
+    print("clz selective cells")
+    sc.pl.umap(adata, color=["is_clz_selective"])
+    
+    #print("calculating gene marker of clz selective cell")
+    #sc.tl.rank_genes_groups(adata, 'is_clz_selective', method='logreg',use_raw=False)
+    #sc.pl.rank_genes_groups(adata, n_genes=30, sharey=False)
+
+    return(adata)
+
+def create_GPCR_pattern(n_pattern):
+    D_R_mtx,GPCR_type_df,drug_list,GPCR_list=load_parameters()
+    # 重複を避けるために使用するセット
+    unique_patterns_set = set()
+
+    # 結果を保存するための辞書
+    pattern_dict = {}
+
+    # 1万種類の独自の活性化パターンを生成
+    i = 0
+    while len(unique_patterns_set) < n_pattern:
+        # ランダムな活性化パターンを生成（0はFalse、1はTrueとする）
+        random_pattern = np.random.randint(2, size=len(GPCR_list2))
+        # パターンを文字列に変換してハッシュ可能にする
+        pattern_str = ''.join(map(str, random_pattern))
+
+        # このパターンがまだ見つかっていない場合は保存
+        if pattern_str not in unique_patterns_set:
+            unique_patterns_set.add(pattern_str)
+            pattern_dict[f"Pattern_{i+1}"] = {gpcr: bool(val) for gpcr, val in zip(GPCR_list2, random_pattern)}
+            i += 1
+            
+    # pattern_dictをデータフレームに変換
+    pattern_df = pd.DataFrame.from_dict(pattern_dict, orient='index').reset_index(drop=True)
+    return pattern_df
+
+
+"""
 def preprocess_adata_in_batch(adata_path,max_cells):
     preprocess_start = time.time()
     D_R_mtx,GPCR_type_df,drug_list,GPCR_list=load_parameters()
@@ -406,126 +524,4 @@ def preprocess_adata_in_batch(adata_path,max_cells):
     adata.write(processed_file_path)
     
     return adata
-
-def calc_drug_response(adata,GPCR_df,GPCR_type_df,drug_list,D_R_mtx):
-    #noramlize GPCR expression levels
-    GPCR_adata=anndata.AnnData(X=GPCR_df)
-    GPCR_adata_norm=sc.pp.normalize_total(GPCR_adata,target_sum=1e4,inplace=False)['X']
-    GPCR_adata_norm_df=pd.DataFrame(GPCR_adata_norm,columns=GPCR_adata.var.index)
-    norm_df=pd.DataFrame(GPCR_adata_norm)
-    norm_col=[str[:-4] for str in GPCR_df.columns]
-    norm_df.columns=norm_col
-    
-    GPCR_type_df=GPCR_type_df[GPCR_type_df.receptor_name.isin(norm_col)]
-    
-    Gs=GPCR_type_df[GPCR_type_df.type=="Gs"]["receptor_name"].values
-    Gi=GPCR_type_df[GPCR_type_df.type=="Gi"]["receptor_name"].values
-    Gq=GPCR_type_df[GPCR_type_df.type=="Gq"]["receptor_name"].values
-    
-    cAMP_df=pd.DataFrame(columns=drug_list)
-    #Ca_df=pd.DataFrame(columns=drug_list)
-    drug_conc_list=[0.1,0.2,1]
-    drug_conc_name_list=["low","mid","high"]
-    for drug in drug_list:
-        #for i,drug_conc in enumerate(drug_conc_list):
-            i=1
-            drug_conc=D_R_mtx.mean()
-            Gs_effect=(norm_df.loc[:,Gs]/(1+drug_conc/D_R_mtx.loc[drug,Gs])).sum(axis=1) 
-            Gi_effect=(norm_df.loc[:,Gi]/(1+drug_conc/D_R_mtx.loc[drug,Gi])).sum(axis=1)
-            #Gs_effect=(norm_df.loc[:,Gs]/D_R_mtx.loc[drug,Gs]).sum(axis=1) 
-            #Gi_effect=(norm_df.loc[:,Gi]/D_R_mtx.loc[drug,Gi]).sum(axis=1)
-            #Gq_effect=(norm_df.loc[:,Gq]/D_R_mtx.loc[drug,Gq]).sum(axis=1)
-            cAMPmod=Gi_effect-Gs_effect #Giの阻害→cAMP上昇、Gsの阻害→cAMP低下
-            #Camod=-Gq_effect #Gq阻害→Ca低下
-            cAMP_df[drug+"_"+drug_conc_name_list[i]]=cAMPmod
-            #Ca_df[drug]=Camod
-        
-    cAMP_df.index=adata.obs_names
-    #Ca_df.index=adata.obs_names
-    #Ca_df=Ca_df+10**(-4)
-    for drug in drug_list:
-        adata.obs['cAMP_%s'%drug]=cAMP_df[drug+"_mid"]
-        #adata.obs['Ca_%s'%drug]=Ca_df[drug]
-        
-    return adata
-
-def calc_clz_selective_cell(adata,drug_list):
-    selectivity_threshold=1.2
-    adata.obs["is_clz_activated"]=np.zeros(len(adata.obs))
-    adata.obs["is_clz_activated"][adata.obs["cAMP_CLOZAPINE"]>10]=1
-    adata.obs["is_clz_activated"]=adata.obs["is_clz_activated"].astype("category")
-    
-    adata.obs["is_clz_inhibited"]=np.zeros(len(adata.obs))
-    adata.obs["is_clz_inhibited"][adata.obs["cAMP_CLOZAPINE"]<-10]=1
-    adata.obs["is_clz_inhibited"]=adata.obs["is_clz_inhibited"].astype("category")
-    """
-    drug_list_temp=drug_list.copy()
-    drug_list_temp.remove("CLOZAPINE")
-
-    for idx,drug in enumerate(drug_list_temp):
-        #print(idx)
-        if idx==0:
-            cAMP_mean=adata.obs["cAMP_%s"%drug]
-        else:
-            cAMP_mean=cAMP_mean+adata.obs["cAMP_%s"%drug]
-        #print(adata.obs["cAMP_%s"%drug])
-    cAMP_mean=cAMP_mean/len(drug_list_temp)
-    adata.obs["cAMP_mean_other_than_czp"]=cAMP_mean
-    adata.obs["cAMP_clz_selectivity"]=adata.obs["cAMP_CLOZAPINE"]**2/cAMP_mean**2
-    
-    adata.obs["is_clz_selective"]=np.zeros(len(adata.obs))
-    adata.obs["is_clz_selective"][(adata.obs["cAMP_clz_selectivity"]>selectivity_threshold)&(adata.obs["cAMP_CLOZAPINE"]>0)]=1
-    adata.obs["is_clz_selective"]=adata.obs["is_clz_selective"].astype("category")"
-    """
-    # 「CLOZAPINE」以外の薬に対応するカラム名のリストを作成
-    drug_cols = [f"cAMP_{drug}" for drug in drug_list if drug != "CLOZAPINE"]
-
-    # メモリ使用量削減のため、必要に応じて計算対象カラムを float32 にキャスト
-    for col in drug_cols + ["cAMP_CLOZAPINE"]:
-        adata.obs[col] = adata.obs[col].astype("float32")
-
-    # 薬ごとの cAMP 値の平均を一括で計算
-    adata.obs["cAMP_mean_other_than_czp"] = adata.obs[drug_cols].mean(axis=1)
-
-    # クロザピンに対するセレクティビティの計算（各細胞ごとにベクトル演算）
-    adata.obs["cAMP_clz_selectivity"] = (adata.obs["cAMP_CLOZAPINE"] ** 2) / (adata.obs["cAMP_mean_other_than_czp"] ** 2)
-
-    # selectivity_threshold と cAMP_CLOZAPINE > 0 の条件を満たす細胞をカテゴリ型でラベル付け
-    adata.obs["is_clz_selective"] = (((adata.obs["cAMP_clz_selectivity"] > selectivity_threshold) & 
-                                    (adata.obs["cAMP_CLOZAPINE"] > 0))
-                                    ).astype("category")
-    
-    print("clz selective cells")
-    sc.pl.umap(adata, color=["is_clz_selective"])
-    
-    #print("calculating gene marker of clz selective cell")
-    #sc.tl.rank_genes_groups(adata, 'is_clz_selective', method='logreg',use_raw=False)
-    #sc.pl.rank_genes_groups(adata, n_genes=30, sharey=False)
-
-    return(adata)
-
-def create_GPCR_pattern(n_pattern):
-    D_R_mtx,GPCR_type_df,drug_list,GPCR_list=load_parameters()
-    # 重複を避けるために使用するセット
-    unique_patterns_set = set()
-
-    # 結果を保存するための辞書
-    pattern_dict = {}
-
-    # 1万種類の独自の活性化パターンを生成
-    i = 0
-    while len(unique_patterns_set) < n_pattern:
-        # ランダムな活性化パターンを生成（0はFalse、1はTrueとする）
-        random_pattern = np.random.randint(2, size=len(GPCR_list2))
-        # パターンを文字列に変換してハッシュ可能にする
-        pattern_str = ''.join(map(str, random_pattern))
-
-        # このパターンがまだ見つかっていない場合は保存
-        if pattern_str not in unique_patterns_set:
-            unique_patterns_set.add(pattern_str)
-            pattern_dict[f"Pattern_{i+1}"] = {gpcr: bool(val) for gpcr, val in zip(GPCR_list2, random_pattern)}
-            i += 1
-            
-    # pattern_dictをデータフレームに変換
-    pattern_df = pd.DataFrame.from_dict(pattern_dict, orient='index').reset_index(drop=True)
-    return pattern_df
+"""
