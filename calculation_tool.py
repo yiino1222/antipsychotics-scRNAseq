@@ -275,7 +275,7 @@ def UMAP_adata(adata,n_neighbors,knn_n_pcs,umap_min_dist,umap_spread):
     return adata
 
 def calc_drug_response(adata,GPCR_df,GPCR_type_df,drug_list,D_R_mtx,drug_conc):
-    #noramlize GPCR expression levels
+    #normalize GPCR expression levels
     GPCR_adata=anndata.AnnData(X=GPCR_df)
     GPCR_adata_norm=sc.pp.normalize_total(GPCR_adata,target_sum=1e4,inplace=False)['X']
     GPCR_adata_norm_df=pd.DataFrame(GPCR_adata_norm,columns=GPCR_adata.var.index)
